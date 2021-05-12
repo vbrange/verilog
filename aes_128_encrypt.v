@@ -1,18 +1,16 @@
-module Aes128(
+module Aes128Encrypt(
     input clk,
     input reset_n,
     input [127:0] in,
     input [127:0] key,
-    input is_decrypt,
     output [127:0] out,
     output ready);
 
-  localparam STATE_ENCRYPT  = 2'b01;
-  localparam STATE_DECRYPT  = 2'b10;
-  localparam STATE_FINISHED = 2'b00;
+  localparam STATE_BUSY  = 0;
+  localparam STATE_IDLE = 1;
 
-  reg [1:0] state;
-  reg [3:0] round;
+  reg state;
+  reg [11:0] round;
   reg buf_ready;
   reg [127:0] buf_in;
   reg [127:0] buf_out;
@@ -136,14 +134,14 @@ module Aes128(
   end
   endfunction
 
-  function [127:0] KeySchedule (input [127:0] key, input [7:0] rc);
-  begin
-    KeySchedule[ 31: 0] = { Sbox(key[103:96]), Sbox(key[127:120]), Sbox(key[119:112]), Sbox(key[111:104]) } ^ key[31:0] ^ rc;
-    KeySchedule[ 63:32] = { Sbox(key[103:96]), Sbox(key[127:120]), Sbox(key[119:112]), Sbox(key[111:104]) } ^ key[31:0] ^ key[63:32] ^ rc;
-    KeySchedule[ 95:64] = { Sbox(key[103:96]), Sbox(key[127:120]), Sbox(key[119:112]), Sbox(key[111:104]) } ^ key[31:0] ^ key[63:32] ^ key[95:64] ^ rc;
-    KeySchedule[127:96] = { Sbox(key[103:96]), Sbox(key[127:120]), Sbox(key[119:112]), Sbox(key[111:104]) } ^ key[31:0] ^ key[63:32] ^ key[95:64] ^ key[127:96] ^ rc;
-  end
-  endfunction
+  reg [7:0] rcon;
+  wire[31:0] key_schedule_w0 = { Sbox(buf_key[103:96]), Sbox(buf_key[127:120]), Sbox(buf_key[119:112]), Sbox(buf_key[111:104]) } ^ buf_key[31:0] ^ rcon;
+  wire[31:0] key_schedule_w1 = key_schedule_w0 ^ buf_key[63:32];
+  wire[31:0] key_schedule_w2 = key_schedule_w1 ^ buf_key[95:64];
+  wire[31:0] key_schedule_w3 = key_schedule_w2 ^ buf_key[127:96];
+
+  wire [127:0] key_schedule_circuit;
+  assign key_schedule_circuit = { key_schedule_w3, key_schedule_w2, key_schedule_w1, key_schedule_w0 };
 
   wire[127:0] final_round_circuit;
   assign final_round_circuit[127:0] = ShiftRows(SubBytes(buf_in));
@@ -151,38 +149,31 @@ module Aes128(
   wire[127:0] round_circuit;
   assign round_circuit[127:0] = MixColumns(final_round_circuit);
 
-  reg [7:0] rcon;
-  wire [127:0] key_schedule_circuit;
-  assign key_schedule_circuit = KeySchedule(buf_key, rcon);
-
   always @(posedge clk)
   begin
     if (!reset_n)
     begin
-      case (is_decrypt)
-        0: state <= STATE_ENCRYPT;
-        1: state <= STATE_DECRYPT;
-      endcase
+      state <= STATE_BUSY;
 
       buf_out <= 0;
       buf_ready <= 0;
       buf_in <= in;
       buf_key <= key;
 
-      round <= 0;
+      round <= 1;
       rcon <= 8'h01;
     end
     else
     begin
       case (state)
-          STATE_ENCRYPT:
+          STATE_BUSY:
           begin
             case (round)
-              // First round is special.
-              0: buf_in <= buf_in ^ buf_key;
-              // Last round is special.
-              10: buf_out <= final_round_circuit ^ buf_key;
-              // Remaining rounds.
+              // First round.
+              11'b00000000001: buf_in <= buf_in ^ buf_key;
+              // Last round.
+              11'b10000000000: buf_out <= final_round_circuit ^ buf_key;
+              // Normal rounds.
               default: buf_in <= round_circuit ^ buf_key;
             endcase
 
@@ -193,13 +184,13 @@ module Aes128(
             else
               rcon <= (rcon << 1);
 
-            if (round == 10)
-              state <= STATE_FINISHED;
+            if (round == 11'b10000000000)
+              state <= STATE_IDLE;
 
-            round <= round + 1;
+            round <= round << 1;
           end
 
-          STATE_FINISHED:
+          STATE_IDLE:
           begin
             buf_ready <= 1;
           end

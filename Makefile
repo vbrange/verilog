@@ -1,7 +1,7 @@
-all: aes_128
+all: aes_128_encrypt
 
-aes_128:
-	iverilog -o aes_128_test aes_128.v aes_128_test.v && ./aes_128_test
+aes_128_encrypt:
+	iverilog -o aes_128_encrypt_test aes_128_encrypt.v aes_128_encrypt_test.v && ./aes_128_encrypt_test
 
 clean:
-	rm -f ./aes_128_test
+	rm -f ./aes_128_encrypt_test
