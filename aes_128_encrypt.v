@@ -6,11 +6,11 @@ module Aes128Encrypt(
     output [127:0] out,
     output ready);
 
-  localparam STATE_BUSY  = 0;
+  localparam STATE_BUSY = 0;
   localparam STATE_IDLE = 1;
 
   reg state;
-  reg [11:0] round;
+  reg [10:0] round;
   reg buf_ready;
   reg [127:0] buf_in;
   reg [127:0] buf_out;
@@ -90,7 +90,7 @@ module Aes128Encrypt(
     end
   endfunction
 
-  function [127:0] ShiftRows (input [127:0] buf_in);
+  function [127:0] ShiftRows (input [127:0] buf_state);
     integer i, j, col, row;
   begin
     for (i = 0; i < 16; i = i + 1)
@@ -100,17 +100,17 @@ module Aes128Encrypt(
       col = (4 + col - row) % 4;
       j = col*4 + row;
 
-      ShiftRows[8*j+:8] = buf_in[8*i+:8];
+      ShiftRows[8*j+:8] = buf_state[8*i+:8];
     end
   end
   endfunction
 
-  function [127:0] SubBytes (input [127:0] buf_in);
+  function [127:0] SubBytes (input [127:0] buf_state);
     integer i;
   begin
     for (i = 0; i < 16; i = i + 1)
     begin
-      SubBytes[8*i+:8] = Sbox(buf_in[8*i+:8]);
+      SubBytes[8*i+:8] = Sbox(buf_state[8*i+:8]);
     end
   end
   endfunction
@@ -124,18 +124,18 @@ module Aes128Encrypt(
   end
   endfunction
 
-  function [127:0] MixColumns (input [127:0] buf_in);
+  function [127:0] MixColumns (input [127:0] buf_state);
     integer i;
   begin
     for (i = 0; i < 4; i = i + 1)
     begin
-      MixColumns[32*i+:32] = MixColumn(buf_in[32*i+24+:8], buf_in[32*i+16+:8], buf_in[32*i+8+:8], buf_in[32*i+0+:8]);
+      MixColumns[32*i+:32] = MixColumn(buf_state[32*i+24+:8], buf_state[32*i+16+:8], buf_state[32*i+8+:8], buf_state[32*i+0+:8]);
     end
   end
   endfunction
 
   reg [7:0] rcon;
-  wire[31:0] key_schedule_w0 = { Sbox(buf_key[103:96]), Sbox(buf_key[127:120]), Sbox(buf_key[119:112]), Sbox(buf_key[111:104]) } ^ buf_key[31:0] ^ rcon;
+  wire[31:0] key_schedule_w0 = { Sbox(buf_key[103:96]), Sbox(buf_key[127:120]), Sbox(buf_key[119:112]), Sbox(buf_key[111:104]) } ^ buf_key[31:0] ^ {24'b0, rcon};
   wire[31:0] key_schedule_w1 = key_schedule_w0 ^ buf_key[63:32];
   wire[31:0] key_schedule_w2 = key_schedule_w1 ^ buf_key[95:64];
   wire[31:0] key_schedule_w3 = key_schedule_w2 ^ buf_key[127:96];
@@ -168,18 +168,19 @@ module Aes128Encrypt(
       case (state)
           STATE_BUSY:
           begin
-            case (round)
+            casez (round)
               // First round.
-              11'b00000000001: buf_in <= buf_in ^ buf_key;
-              // Last round.
-              11'b10000000000: buf_out <= final_round_circuit ^ buf_key;
+              11'b0?????????1: buf_in <= buf_in ^ buf_key;
               // Normal rounds.
-              default: buf_in <= round_circuit ^ buf_key;
+              11'b0?????????0: buf_in <= round_circuit ^ buf_key;
+              // Last round.
+              11'b1?????????0: buf_out <= final_round_circuit ^ buf_key;
+              default:;
             endcase
 
             buf_key <= key_schedule_circuit;
 
-            if (rcon & 8'b10000000)
+            if (rcon[7])
               rcon <= (rcon << 1) ^ 8'h1B;
             else
               rcon <= (rcon << 1);
